@@ -1,5 +1,7 @@
 import numpy as np
+from typing import List
 import scipy.sparse as sp
+from collections.abc import Iterable
 
 
 class Graph:
@@ -131,3 +133,55 @@ class Graph:
             if self[key] is not None and not key.startswith("__")
         ]
         return keys
+
+class GraphSnapshot(Graph):
+    def __init__(self, x=None, a=None, e=None, y=None, t=None, **kwargs):
+        self.t = t
+        super().__init__(
+        x = x,
+        a = a,
+        e = e,
+        y = y,
+        **kwargs)
+
+
+class DynamicGraph: 
+    """
+    A container to represent a dynamic graph, a sequence of graphs with each assigned a timestamp. The data associated
+    with the DynamicGraph is stored in its attributes:
+
+    """
+    def __init__(self, snapshots: List[GraphSnapshot]):
+        self.time_sequence = np.array([ snapshot for snapshot in sorted(snapshots, key=self.__sort_key)])
+
+
+
+    def __sort_key(snapshot: GraphSnapshot) -> int:
+        return int(snapshot.t)
+    
+    @property
+    def n_snapshots(self) -> int: 
+        return self.time_sequence.size
+
+    @property
+    def max_n_nodes(self):
+        """
+        return the maximum size of the snapshots
+        """
+        if self.n_snapshots >= 1:
+            return max([x.n_nodes for x in self.time_sequence])
+        else:
+            return None
+
+
+    @property
+    def n_node_features(self):
+        """
+        assume that each node has the same number of features;
+        need to be override for heterogeneous graph
+        """
+        if self.n_snapshots > 0:
+            return self.time_sequence[0].shape[-1]
+        else:
+            return None
+
