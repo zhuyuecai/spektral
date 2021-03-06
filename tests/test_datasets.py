@@ -14,7 +14,8 @@ def test_citation():
 
 def test_graphsage():
     # Test only PPI because Travis otherwise runs into memory errors
-    dataset = datasets.PPI()
+    #dataset = datasets.PPI()
+    dataset = datasets.Reddit()
     _ = SingleLoader(dataset)
 
 
@@ -56,3 +57,13 @@ def test_tud():
 
     bl = BatchLoader(dataset, batch_size=batch_size)
     bl.__next__()
+
+
+
+def test_dynamic():
+    dataset = datasets.MovieLen()
+    dataset.n_edge_features()
+    for i in dataset[0].get_snapshots(2):
+        print (i.n_nodes)
+
+

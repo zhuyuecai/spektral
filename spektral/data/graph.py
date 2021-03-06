@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List
+from typing import *
 import scipy.sparse as sp
 from collections.abc import Iterable
 
@@ -149,39 +149,126 @@ class DynamicGraph:
     """
     A container to represent a dynamic graph, a sequence of graphs with each assigned a timestamp. The data associated
     with the DynamicGraph is stored in its attributes:
-
+   
+   params:
+       nodes:  N * H or N * H * T ndarray, where T is number of timetamps, N is number of nodes, H is number of
+       features or node labels.  If T is not present, node features is fixed for all timestamp 
+       edges: a dict with key to be the timestamp and the value is a list of edges, where edge[0] and edge[1] are the
+       node id that could be found in the attribute nodes, and edge[2:] to be the edge features
     """
-    def __init__(self, snapshots: List[GraphSnapshot]):
-        self.time_sequence = np.array([ snapshot for snapshot in sorted(snapshots, key=self.__sort_key)])
-
-
+    def __init__(self, nodes:np.ndarray, edges: Dict[float, List[float]], node_id_maps=None):
+        self.nodes = nodes
+        self.edges = edges
 
     def __sort_key(snapshot: GraphSnapshot) -> int:
         return int(snapshot.t)
     
-    @property
-    def n_snapshots(self) -> int: 
-        return self.time_sequence.size
+    def n_timestamp(self) -> int:
+        return len(self.edges)
+
+    def irregular_node_feature(self) -> bool:
+        return (len(self.nodes.shape) == 3)
+
+    def timestamps(self) -> List:
+        return sorted(self.edges.keys(), reverse=False)
+
+    def n_edge_features(self) -> int:
+        return len(self.edges[0][0])-2
 
     @property
-    def max_n_nodes(self):
+    def n_nodes(self) -> int:
         """
         return the maximum size of the snapshots
         """
-        if self.n_snapshots >= 1:
-            return max([x.n_nodes for x in self.time_sequence])
-        else:
-            return None
-
+        return self.nodes.shape[0]
 
     @property
-    def n_node_features(self):
-        """
-        assume that each node has the same number of features;
-        need to be override for heterogeneous graph
-        """
-        if self.n_snapshots > 0:
-            return self.time_sequence[0].shape[-1]
+    def n_node_features(self) -> int:
+        return self.nodes.shape[1]
+    
+    def __setitem__(self, key, value):
+        setattr(self, key, value)
+
+    def __getitem__(self, key):
+        return getattr(self, key, None)
+
+    def __contains__(self, key):
+        return key in self.keys
+    def __contains__(self, key):
+        return key in self.keys
+    
+    def __repr__(self):
+        return "Graph(n_nodes={}, n_node_features={}, n_edge_features={}, n_labels={})".format(
+            self.n_nodes, self.n_node_features, self.n_edge_features, self.n_labels
+        )
+    @property
+    def keys(self):
+        keys = [
+            key
+            for key in self.__dict__.keys()
+            if self[key] is not None and not key.startswith("__")
+        ]
+        return keys
+    
+    # generator to generate snapshots of the dynamic graph
+    # todo add support for directed graph
+    def get_snapshots(self, n_snapshot: int, positional = True, transform=None):
+        time_map = {}
+        timestamps_list = self.timestamps()
+        n_timestamp = self.n_timestamp()
+        print(n_timestamp)
+        if positional: 
+            timestamp_per_shot = int(n_timestamp / n_snapshot)
+            print(timestamp_per_shot)
+            for i in range(n_snapshot):
+                start = i*timestamp_per_shot
+                end = (i+1)*timestamp_per_shot
+                if end >= n_timestamp:
+                    time_map[i] = timestamps_list[start:]
+                else:
+                    time_map[i] = timestamps_list[start: end]
         else:
-            return None
+            duration = (max(timestamps_list) - min(timestamps_list))/ n_snapshot
+            print(duration)
+            for i in range(n_snapshot):
+                time_map[i] = [t for t in timestamps_list if t >= (i*duration) and t < ((i+1)*duration)]
+
+        cummulated_e = None
+
+        nodes_feature = None
+        if not self.irregular_node_feature():
+            nodes_feature = self.nodes
+        else:
+            nodes_feature = np.zeros(self.nodes.shape[:2])
+        if self.n_edge_features() > 1:
+            cummulated_e = np.zeros([self.n_nodes, self.n_nodes, self.n_edge_features])
+        elif self.n_edge_features() == 1:
+            cummulated_e = np.zeros([self.n_nodes, self.n_nodes])
+        else:
+            cummulated_e = None
+
+        cummulated_a = np.zeros([self.n_nodes, self.n_nodes])
+        for i in range(n_snapshot):
+            for tm in time_map[i]:
+                if self.irregular_node_feature():
+                    pass # todo add support for dynamic graph with node features changing along time
+                for e in self.edges[tm]:
+                    cummulated_a[e[0], e[1]] = 1
+                    cummulated_a[e[1], e[0]] = 1
+                    if cummulated_e is not None:
+                        if self.n_edge_features() > 1:
+                            for j in range(self.n_edge_features()):
+                                cummulated_e[e[0], e[1], j] = e[2+j]
+                                cummulated_e[e[1], e[0], j] = e[2+j]
+                        else:
+                            cummulated_e[e[0], e[1]] = e[2]
+                            cummulated_e[e[1], e[0]] = e[2]
+
+            current_g = GraphSnapshot(x=self.nodes,e = cummulated_e, a=cummulated_a, t=i)
+            if transform:
+                if not callable(transform):
+                    raise ValueError("`transform` must be callable")
+                current_g = transform(current_g)
+            yield current_g
+
 
